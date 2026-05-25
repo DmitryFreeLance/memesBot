@@ -3,6 +3,7 @@ package com.memesbot.bot;
 import com.memesbot.model.ResponseDraft;
 import com.memesbot.service.MemeAssistantService;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -81,8 +82,14 @@ public class MemesTelegramBot extends TelegramLongPollingBot {
     }
 
     private void handleUserRequest(long chatId, long userId, String username, String userText) {
+        Integer progressMessageId = null;
         try {
+            Message progressMessage = sendText(chatId, "Пишу ответ...");
+            progressMessageId = progressMessage.getMessageId();
+
             ResponseDraft draft = memeAssistantService.handle(chatId, userId, username, userText);
+
+            deleteMessageSilently(chatId, progressMessageId);
             sendText(chatId, draft.primaryReply());
 
             Thread.sleep(1000);
@@ -90,6 +97,7 @@ public class MemesTelegramBot extends TelegramLongPollingBot {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
+            deleteMessageSilently(chatId, progressMessageId);
             sendText(chatId, "Упс, что-то заглючило. Закинь мем еще раз, сейчас починимся.");
         } finally {
             busyChats.remove(chatId);
@@ -113,16 +121,29 @@ public class MemesTelegramBot extends TelegramLongPollingBot {
         return "user-" + message.getFrom().getId();
     }
 
-    private void sendText(long chatId, String text) {
+    private Message sendText(long chatId, String text) {
         SendMessage sendMessage = new SendMessage();
         sendMessage.setChatId(Long.toString(chatId));
         sendMessage.setText(text);
         sendMessage.setDisableWebPagePreview(true);
 
         try {
-            execute(sendMessage);
+            return execute(sendMessage);
         } catch (TelegramApiException e) {
             throw new IllegalStateException("Failed to send Telegram message", e);
+        }
+    }
+
+    private void deleteMessageSilently(long chatId, Integer messageId) {
+        if (messageId == null) {
+            return;
+        }
+
+        DeleteMessage deleteMessage = new DeleteMessage(Long.toString(chatId), messageId);
+        try {
+            execute(deleteMessage);
+        } catch (TelegramApiException ignored) {
+            // If Telegram already removed the message or it's too old, we continue normally.
         }
     }
 }
